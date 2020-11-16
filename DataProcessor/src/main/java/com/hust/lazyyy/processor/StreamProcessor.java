@@ -1,13 +1,17 @@
 package com.hust.lazyyy.processor;
 
 import com.hust.lazyyy.config.GlobalConfig;
+import com.hust.lazyyy.filter.*;
+import com.hust.lazyyy.model.ResultScore;
 import com.hust.lazyyy.model.Tweet;
+import com.hust.lazyyy.model.TweetScore;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.Optional;
 import org.apache.spark.api.java.function.Function3;
+import org.apache.spark.api.java.function.VoidFunction2;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
@@ -15,15 +19,17 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.State;
 import org.apache.spark.streaming.StateSpec;
+import org.apache.spark.streaming.Time;
 import org.apache.spark.streaming.api.java.*;
 import org.apache.spark.streaming.kafka010.*;
 import scala.Tuple2;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class StreamProcessor {
+public class StreamProcessor implements Serializable {
 
     public static void main(String[] args) throws InterruptedException, ClassNotFoundException, IOException {
         StreamProcessor processor = new StreamProcessor();
@@ -63,22 +69,48 @@ public class StreamProcessor {
 
     private void processStream(JavaStreamingContext streamingContext, SparkSession sparkSession, JavaDStream<Tweet> nonFilteredDataStream) throws IOException {
         appendDataToHDFS(sparkSession, nonFilteredDataStream);
-        JavaDStream<Tweet> filteredIotDataStream = getTweetNotProcessed(nonFilteredDataStream);
+        JavaDStream<Tweet> filteredTweetDataStream = getTweetNotProcessed(nonFilteredDataStream);
 
-        //process data
-//        RealtimeTrafficDataProcessor iotTrafficProcessor = new RealtimeTrafficDataProcessor();
-//        iotTrafficProcessor.processTotalTrafficData(filteredIotDataStream);
-//        iotTrafficProcessor.processWindowTrafficData(filteredIotDataStream);
-//        processPOI(streamingContext, nonFilteredDataStream, iotTrafficProcessor);
-//
-//        RealTimeHeatMapProcessor realTimeHeatMapProcessor = new RealTimeHeatMapProcessor();
-//        realTimeHeatMapProcessor.processHeatMap(filteredIotDataStream);
+        // Remove words
+        JavaDStream<Tweet> tweetsFiltered = filteredTweetDataStream.map(new TextFilter());
+
+        // Remove stop words
+        tweetsFiltered = tweetsFiltered.map(new StopWordsFilter());
+
+        // Get postive score
+        JavaPairDStream<Tweet, Double> positiveTweets = tweetsFiltered.mapToPair(new PositiveScoreFilter());
+
+        // Get negative score
+        JavaPairDStream<Tweet, Double> negativeTweets = tweetsFiltered.mapToPair(new NegativeScoreFilter());
+
+        // Join
+        JavaPairDStream<Tweet, Tuple2<Double, Double>> joined = positiveTweets.join(negativeTweets);
+
+        // Get Score
+        JavaDStream<TweetScore> scoredTweets = joined.map(new JoinScoreFilter());
+
+        scoredTweets.print();
+
+        // Get valid score
+        JavaDStream<TweetScore> filteredScoredTweets = scoredTweets.filter(new ValidScoreFilter());
+
+        // Final result
+        JavaDStream<ResultScore> results = filteredScoredTweets.map(new ScoreResultFilter());
+
+        // Write file
+        results.foreachRDD((resultScoreJavaRDD, time) -> {
+            resultScoreJavaRDD.saveAsTextFile(GlobalConfig.getHDFSDir()+"sentiment/sentiment_"+time.milliseconds());
+        });
+
+        System.out.println("======results=======");
+        results.count().print();
+        results.print();
     }
 
     private JavaDStream<Tweet> getTweetNotProcessed(JavaDStream<Tweet> nonFilteredDataStream) {
 
         JavaPairDStream<String, Tweet> tweetDataPairStream = nonFilteredDataStream
-                .mapToPair(tweet -> new Tuple2<>(tweet.getData().getId(), tweet))
+                .mapToPair(tweet -> new Tuple2<>(tweet.getId(), tweet))
                 .reduceByKey((a, b) -> a);
 
         // Check tweet Id is already processed
@@ -117,7 +149,7 @@ public class StreamProcessor {
             if (!rdd.isEmpty()) {
                 Dataset<Row> dataFrame = sparkSession.createDataFrame(rdd, Tweet.class);
                 Dataset<Row> dfStore = dataFrame.selectExpr(
-                        "data", "matching_rules", "date_tweet",
+                        "id", "text", "tags", "createdAt",
                         "metaData.fromOffset as fromOffset",
                         "metaData.untilOffset as untilOffset",
                         "metaData.kafkaPartition as kafkaPartition",
@@ -157,7 +189,7 @@ public class StreamProcessor {
         OffsetRange[] offsetRanges = ((HasOffsetRanges) item.rdd()).offsetRanges();
 
         return item.mapPartitionsWithIndex((index, items) -> {
-            Map<String, String> meta = new HashMap<String, String>() {{
+            HashMap<String, String> meta = new HashMap<String, String>() {{
                 int partition = offsetRanges[index].partition();
                 long from = offsetRanges[index].fromOffset();
                 long until = offsetRanges[index].untilOffset();

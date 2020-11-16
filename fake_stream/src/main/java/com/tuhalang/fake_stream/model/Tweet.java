@@ -3,48 +3,34 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.hust.lazyyy.model;
+package com.tuhalang.fake_stream.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.io.Serializable;
-import java.util.Calendar;
-import java.sql.Date;
-import java.util.HashMap;
+import javax.persistence.Entity;
+import javax.persistence.Id;
+import javax.persistence.Table;
+import java.util.Date;
 
 /**
  *
  * @author hungpv
  */
-public class Tweet implements Serializable {
-    
+@Entity
+@Table(name = "TWEET")
+public class Tweet {
+
+    @Id
     private String id;
+
     private String text;
+
     private String tags;
+
     @JsonProperty(value = "created_at")
     @JsonFormat(pattern = "yyyy-MM-dd'T'hh:mm:ss.SSS'Z'")
     private Date createdAt;
-
-    private Object withheld;
-
-    private HashMap<String, String> metaData;
-
-    public HashMap<String, String> getMetaData() {
-        return metaData;
-    }
-
-    public void setMetaData(HashMap<String, String> metaData) {
-        this.metaData = metaData;
-    }
-
-    public Object getWithheld() {
-        return withheld;
-    }
-
-    public void setWithheld(Object withheld) {
-        this.withheld = withheld;
-    }
 
     public String getId() {
         return id;
@@ -76,12 +62,6 @@ public class Tweet implements Serializable {
 
     public void setCreatedAt(Date createdAt) {
         this.createdAt = createdAt;
-    }
-
-    public String getDayOfWeek(){
-        Calendar cal = Calendar.getInstance();
-        cal.setTime(this.createdAt);
-        return String.valueOf(cal.get(Calendar.DAY_OF_WEEK));
     }
 
     @Override

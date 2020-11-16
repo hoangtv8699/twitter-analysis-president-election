@@ -11,7 +11,7 @@ import java.util.*;
 public class GlobalConfig {
 
     private static final Logger LOGGER = Logger.getLogger(GlobalConfig.class);
-    private final static String CONFIG_PATH = "application.properties";
+    private final static String CONFIG_PATH = "/home/tuhalang/Documents/HUST/4/Bigdata/twitter-analysis-president-election/DataProcessor/src/main/resources/application.properties";
     private static final Properties properties = new Properties();
     private static final String TOPICS = "topics";
     private static final String APP_NAME = "app.name";
@@ -19,6 +19,9 @@ public class GlobalConfig {
     private static final String DURATION = "stream.duration";
     private static final String CHECKPOINT_DIR = "stream.checkpoint.dir";
     private static final String HDFS_DIR = "app.hdfs.dir";
+    public static final Integer POSITIVE = 1;
+    public static final Integer NEGATIVE = -1;
+    public static final Integer NEUTRAL = 0;
 
     static {
         try {
@@ -66,7 +69,7 @@ public class GlobalConfig {
         Map<String, Object> kafkaParams = new HashMap<>();
         kafkaParams.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         kafkaParams.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, Class.forName(properties.getProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG)));
-        kafkaParams.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, Class.forName(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
+        kafkaParams.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, Class.forName(properties.getProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)));
         kafkaParams.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getProperty(ConsumerConfig.GROUP_ID_CONFIG));
         kafkaParams.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG));
         kafkaParams.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);

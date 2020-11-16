@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hust.lazyyy.model.Tweet;
 import org.apache.kafka.common.serialization.Deserializer;
 
-import java.io.IOException;
 import java.util.Map;
 
 public class TweetDeserializer implements Deserializer<Tweet> {
