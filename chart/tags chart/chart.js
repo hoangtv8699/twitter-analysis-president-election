@@ -188,6 +188,6 @@ am4core.ready(function () {
   series.events.on("inited", function () {
     setTimeout(function () {
       playButton.isActive = true; // this starts interval
-    }, 2000);
+    }, 4000);
   });
 }); // end am4core.ready()
