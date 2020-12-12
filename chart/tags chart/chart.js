@@ -1,10 +1,12 @@
+import tags from "./tags.js";
+
 am4core.ready(function () {
   // Themes begin
   am4core.useTheme(am4themes_animated);
   // Themes end
 
   var chart = am4core.create("chartdiv", am4charts.XYChart);
-  chart.padding(40, 40, 40, 40);
+  chart.padding(5, 5, 5, 5);
 
   chart.numberFormatter.bigNumberPrefixes = [
     { number: 1e3, suffix: "K" },
@@ -18,7 +20,7 @@ am4core.ready(function () {
   label.horizontalCenter = "right";
   label.verticalCenter = "middle";
   label.dx = -15;
-  label.fontSize = 50;
+  label.fontSize = 40;
 
   var playButton = chart.plotContainer.createChild(am4core.PlayButton);
   playButton.x = am4core.percent(97);
@@ -50,7 +52,7 @@ am4core.ready(function () {
 
   var series = chart.series.push(new am4charts.ColumnSeries());
   series.dataFields.categoryY = "choice";
-  series.dataFields.valueX = "percentage";
+  series.dataFields.valueX = "numberOfTweets";
   series.tooltipText = "{valueX.value}";
   series.columns.template.strokeOpacity = 0;
   series.columns.template.column.cornerRadiusBottomRight = 5;
@@ -68,7 +70,7 @@ am4core.ready(function () {
 
   // as by default columns of the same series are of the same color, we add adapter which takes colors from chart.colors color set
   series.columns.template.adapter.add("fill", function (fill, target) {
-    return chart.colors.getIndex(target.dataItem.index);
+    return chart.colors.getIndex(target.dataItem.index + 80);
   });
 
   var day = 3;
@@ -107,8 +109,8 @@ am4core.ready(function () {
 
     var itemsWithNonZero = 0;
     for (var i = 0; i < chart.data.length; i++) {
-      chart.data[i].percentage = newData[i].percentage;
-      if (chart.data[i].percentage > 0) {
+      chart.data[i].numberOfTweets = newData[i].numberOfTweets;
+      if (chart.data[i].numberOfTweets > 0) {
         itemsWithNonZero++;
       }
     }
@@ -132,11 +134,30 @@ am4core.ready(function () {
 
   categoryAxis.sortBySeries = series;
 
+  function generateData() {
+    var data = [];
+    var tempTagsArr = tags;
+
+    for (var i = 0; i < tags.length; i++) {
+      var tweetNumber = Math.floor(Math.random() * 1000000);
+      var tagIndex = Math.floor(Math.random() * tags.length);
+      var dataElement = {
+        choice: tempTagsArr[tagIndex],
+        numberOfTweets: tweetNumber,
+      };
+
+      data.push(dataElement);
+    }
+
+    data = data.slice(0, 10);
+
+    return data;
+  }
+
   var numberOfDays = 30 - 3 + 1 + 14;
   var allData = [];
 
   function fillData() {
-    var trumpSide, joeSide, neutral;
     var dayLabel = 3;
     var monthLabel = 11;
     for (var i = 0; i < numberOfDays; i++) {
@@ -149,25 +170,15 @@ am4core.ready(function () {
         monthLabel = 12;
       }
 
-      neutral = Math.floor(Math.random() * 91);
-      trumpSide = parseInt((100 - neutral) / 3);
-      joeSide = 100 - neutral - trumpSide;
+      var dataArr = generateData();
 
-      allData[labelTag] = [
-        {
-          choice: "Donald Trump",
-          percentage: trumpSide,
-        },
-        { choice: "Joe Biden", percentage: joeSide },
-        {
-          choice: "Neutral/Not vote",
-          percentage: neutral,
-        },
-      ];
+      allData[labelTag] = dataArr;
     }
   }
 
   fillData();
+
+  console.log(allData);
 
   chart.data = JSON.parse(
     JSON.stringify(allData[day.toString() + "/" + month.toString()])
