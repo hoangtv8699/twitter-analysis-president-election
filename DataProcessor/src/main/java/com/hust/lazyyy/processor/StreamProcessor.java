@@ -5,21 +5,18 @@ import com.hust.lazyyy.filter.*;
 import com.hust.lazyyy.model.ResultScore;
 import com.hust.lazyyy.model.Tweet;
 import com.hust.lazyyy.model.TweetScore;
+import com.hust.lazyyy.service.KafkaService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.Optional;
+import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.api.java.function.Function3;
-import org.apache.spark.api.java.function.VoidFunction2;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-import org.apache.spark.sql.SaveMode;
-import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.*;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.State;
 import org.apache.spark.streaming.StateSpec;
-import org.apache.spark.streaming.Time;
 import org.apache.spark.streaming.api.java.*;
 import org.apache.spark.streaming.kafka010.*;
 import scala.Tuple2;
@@ -39,8 +36,10 @@ public class StreamProcessor implements Serializable {
     public void start() throws InterruptedException, ClassNotFoundException, IOException {
         // init
         SparkConf conf = GlobalConfig.getSparkConfig();
+
         JavaStreamingContext streamingContext = new JavaStreamingContext(conf, Durations.seconds(GlobalConfig.getStreamDuration()));
         final SparkSession sparkSession = SparkSession.builder().config(conf).getOrCreate();
+        sparkSession.sparkContext().setLogLevel("ERROR");
 
         // set checkpoint
         streamingContext.checkpoint(GlobalConfig.getCheckpointDir());
@@ -72,39 +71,81 @@ public class StreamProcessor implements Serializable {
         JavaDStream<Tweet> filteredTweetDataStream = getTweetNotProcessed(nonFilteredDataStream);
 
         // Remove words
-        JavaDStream<Tweet> tweetsFiltered = filteredTweetDataStream.map(new TextFilter());
+        JavaDStream<Tweet> tweets = filteredTweetDataStream.map(new TextFilter());
+
 
         // Remove stop words
-        tweetsFiltered = tweetsFiltered.map(new StopWordsFilter());
+        JavaDStream<Tweet> tweetsFiltered = tweets.map(new StopWordsFilter());
+
 
         // Get postive score
-        JavaPairDStream<Tweet, Double> positiveTweets = tweetsFiltered.mapToPair(new PositiveScoreFilter());
-
-        // Get negative score
-        JavaPairDStream<Tweet, Double> negativeTweets = tweetsFiltered.mapToPair(new NegativeScoreFilter());
-
-        // Join
-        JavaPairDStream<Tweet, Tuple2<Double, Double>> joined = positiveTweets.join(negativeTweets);
+        JavaPairDStream<Tweet, Tuple2<Double, Double>> _scoredTweets = tweetsFiltered.mapToPair(new ScoreFilter());
 
         // Get Score
-        JavaDStream<TweetScore> scoredTweets = joined.map(new JoinScoreFilter());
-
-        scoredTweets.print();
+        JavaDStream<TweetScore> scoredTweets = _scoredTweets.map(new JoinScoreFilter());
 
         // Get valid score
-        JavaDStream<TweetScore> filteredScoredTweets = scoredTweets.filter(new ValidScoreFilter());
+        //JavaDStream<TweetScore> filteredScoredTweets = scoredTweets.filter(new ValidScoreFilter());
 
         // Final result
-        JavaDStream<ResultScore> results = filteredScoredTweets.map(new ScoreResultFilter());
+        JavaDStream<ResultScore> results = scoredTweets.map(new ScoreResultFilter());
+        results.cache();
 
-        // Write file
-        results.foreachRDD((resultScoreJavaRDD, time) -> {
-            resultScoreJavaRDD.saveAsTextFile(GlobalConfig.getHDFSDir()+"sentiment/sentiment_"+time.milliseconds());
+        //results.print();
+        JavaDStream<ResultScore> resultFlat = results.flatMap(new FlatMapFunction<ResultScore, ResultScore>() {
+            @Override
+            public Iterator<ResultScore> call(ResultScore resultScore) throws Exception {
+                String tags = resultScore.getTag();
+                tags = tags.substring(0, tags.length()-1);
+                return Arrays.stream(tags.split(";")).map(tag -> {
+                   ResultScore resultScore1 = resultScore.clone();
+                   resultScore1.setTag(tag);
+                   return resultScore1;
+                }).iterator();
+            }
         });
 
         System.out.println("======results=======");
-        results.count().print();
-        results.print();
+        resultFlat.count().print();
+        resultFlat.cache();
+
+        // Write file
+        resultFlat.foreachRDD((resultScoreJavaRDD, time) -> {
+            Dataset<Row> resultDF = sparkSession.createDataFrame(resultScoreJavaRDD, ResultScore.class);
+
+            Dataset<Row> negDF = resultDF.filter("negativeScore > positiveScore").groupBy("tag").count()
+                    .selectExpr("tag", "count as neg");
+            Dataset<Row> posDF = resultDF.filter("negativeScore < positiveScore").groupBy("tag").count()
+                    .selectExpr("tag", "count as pos");
+            Dataset<Row> neuDF = resultDF.filter("negativeScore == positiveScore").groupBy("tag").count()
+                    .selectExpr("tag", "count as neu");
+
+            Dataset<Row> rs = negDF.join(posDF, "tag").join(neuDF, "tag");
+
+            rs.selectExpr("tag || ':' || pos || ':' || neg || ':' || neu as value")
+                    .foreach(row -> {
+                        KafkaService.getInstance().process(row);
+                    });
+
+
+            rs.write()
+                    .format("jdbc")
+                    .option("url", "jdbc:postgresql://localhost:5432/postgres")
+                    .option("dbTable", "result")
+                    .option("user", "POSTGRES")
+                    .option("password", "123456a@")
+                    .mode("append")
+                    .save();
+
+            resultDF.write()
+                    .format("jdbc")
+                    .option("url", "jdbc:postgresql://localhost:5432/postgres")
+                    .option("dbTable", "result_score")
+                    .option("user", "POSTGRES")
+                    .option("password", "123456a@")
+                    .mode("append")
+                    .save();
+        });
     }
 
     private JavaDStream<Tweet> getTweetNotProcessed(JavaDStream<Tweet> nonFilteredDataStream) {

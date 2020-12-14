@@ -2,6 +2,7 @@ package com.hust.lazyyy.model;
 
 import java.io.Serializable;
 import java.sql.Date;
+import java.util.UUID;
 
 public class ResultScore implements Serializable {
 
@@ -72,5 +73,18 @@ public class ResultScore implements Serializable {
     @Override
     public String toString() {
         return this.id + " - "  + this.text + " - " + this.result;
+    }
+
+    @Override
+    public ResultScore clone() {
+        ResultScore resultScore = new ResultScore();
+        resultScore.setId(UUID.randomUUID().toString());
+        resultScore.setResult(this.result);
+        resultScore.setPositiveScore(this.positiveScore);
+        resultScore.setNegativeScore(this.negativeScore);
+        resultScore.setTag(this.tag);
+        resultScore.setText(this.text);
+        resultScore.setCreatedAt(this.createdAt);
+        return resultScore;
     }
 }
